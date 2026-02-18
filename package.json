@@ -1,0 +1,33 @@
+{
+  "name": "@elizaos/plugin-said",
+  "version": "1.0.0",
+  "description": "SAID Protocol — on-chain Solana identity for ElizaOS agents",
+  "main": "dist/index.js",
+  "type": "module",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsup --format esm --dts",
+    "dev": "tsup --format esm --dts --watch",
+    "clean": "rm -rf dist",
+    "lint": "prettier --write ./src"
+  },
+  "dependencies": {
+    "@elizaos/core": "^1.0.0"
+  },
+  "devDependencies": {
+    "tsup": "^8.3.5",
+    "typescript": "^5.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/elizaos-plugins/plugin-said.git"
+  },
+  "agentConfig": {
+    "pluginType": "elizaos:plugin:1.0.0",
+    "pluginParameters": {}
+  },
+  "keywords": ["elizaos", "plugin", "solana", "identity", "said", "on-chain", "ai-agents"]
+}
