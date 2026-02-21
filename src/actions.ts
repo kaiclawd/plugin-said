@@ -9,16 +9,28 @@ export const getSAIDIdentityAction: Action = {
     const service = runtime.getService('said_identity') as SAIDService | null;
     return !!service?.getIdentity();
   },
-  handler: async (runtime: IAgentRuntime, _message: Memory, _state: State, _options: unknown, callback: HandlerCallback) => {
+  handler: async (
+    runtime: IAgentRuntime,
+    _message: Memory,
+    _state?: State,  // FIXED: Made optional
+    _options?: unknown,
+    callback?: HandlerCallback
+  ) => {
     const service = runtime.getService('said_identity') as SAIDService;
     const identity = service.getIdentity();
+    
     if (!identity) {
-      await callback({ text: 'SAID identity not available.' });
+      if (callback) {
+        await callback({ text: 'SAID identity not available.' });
+      }
       return;
     }
-    await callback({
-      text: `My on-chain identity:\n\nWallet: \`${identity.wallet}\`\nProfile: ${identity.profileUrl}\nVerified: ${identity.verified ? '✅' : '❌ (pending)'}\n\nView my public profile at ${identity.profileUrl}`,
-    });
+    
+    if (callback) {
+      await callback({
+        text: `My on-chain identity:\n\nWallet: \`${identity.wallet}\`\nProfile: ${identity.profileUrl}\nVerified: ${identity.verified ? '✅' : '❌ (pending)'}\n\nView my public profile at ${identity.profileUrl}`,
+      });
+    }
   },
   examples: [
     [

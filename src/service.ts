@@ -4,8 +4,10 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-const SAID_API = 'https://api.saidprotocol.com';
+const SAID_API = process.env.SAID_API_URL || 'https://api.saidprotocol.com';
 const BASE58_ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+const MAX_RETRIES = 3;
+const RETRY_DELAY_MS = 1000;
 
 function b58encode(buf: Buffer): string {
   let count = 0;
@@ -31,6 +33,10 @@ function generateSolanaKeypair(): { publicKey: string; secretKey: string } {
     publicKey: b58encode(pubBytes),
     secretKey: b58encode(Buffer.concat([privBytes, pubBytes])),
   };
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 export interface SAIDIdentity {
@@ -65,38 +71,66 @@ export class SAIDService extends Service {
       wallet = kp.publicKey;
       secretKey = kp.secretKey;
       fs.mkdirSync(walletDir, { recursive: true });
-      fs.writeFileSync(walletFile, JSON.stringify({ publicKey: wallet, secretKey, createdAt: new Date().toISOString() }, null, 2), { mode: 0o600 });
+      fs.writeFileSync(
+        walletFile,
+        JSON.stringify({ publicKey: wallet, secretKey, createdAt: new Date().toISOString() }, null, 2),
+        { mode: 0o600 }
+      );
+      logger.info(`[SAID] Generated new identity: ${wallet}`);
     }
 
-    // Register with SAID (free, instant)
-    try {
-      const res = await fetch(`${SAID_API}/api/register/pending`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          wallet,
-          name: runtime.character?.name || runtime.agentId,
-          description: runtime.character?.bio
-            ? (Array.isArray(runtime.character.bio) ? runtime.character.bio[0] : runtime.character.bio)
-            : 'ElizaOS agent',
-          capabilities: ['conversation', 'autonomous-tasks', 'elizaos'],
-          source: 'elizaos-plugin',
-        }),
-      });
+    // Register with SAID (with retries)
+    let registered = false;
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        const res = await fetch(`${SAID_API}/api/register/pending`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            wallet,
+            name: runtime.character?.name || runtime.agentId,
+            description: runtime.character?.bio
+              ? (Array.isArray(runtime.character.bio) ? runtime.character.bio[0] : runtime.character.bio)
+              : 'ElizaOS agent',
+            capabilities: ['conversation', 'autonomous-tasks', 'elizaos'],
+            source: 'elizaos-plugin',
+          }),
+        });
 
-      const data = res.ok ? await res.json() as { wallet?: string; isVerified?: boolean } : {};
+        if (!res.ok) {
+          throw new Error(`SAID API returned ${res.status}: ${await res.text()}`);
+        }
+
+        const data = await res.json() as { wallet?: string; isVerified?: boolean };
+        this.identity = {
+          wallet,
+          secretKey,
+          profileUrl: `https://saidprotocol.com/agents/${wallet}`,
+          registeredAt: new Date().toISOString(),
+          verified: data.isVerified || false,
+        };
+
+        logger.info(`[SAID] Identity registered: ${this.identity.profileUrl}`);
+        registered = true;
+        break;
+      } catch (e) {
+        logger.warn(`[SAID] Registration attempt ${attempt}/${MAX_RETRIES} failed: ${e}`);
+        if (attempt < MAX_RETRIES) {
+          await sleep(RETRY_DELAY_MS * attempt);
+        }
+      }
+    }
+
+    if (!registered) {
+      // Fallback: create local-only identity
+      logger.error('[SAID] All registration attempts failed. Creating local-only identity.');
       this.identity = {
         wallet,
         secretKey,
         profileUrl: `https://saidprotocol.com/agents/${wallet}`,
         registeredAt: new Date().toISOString(),
-        verified: data.isVerified || false,
+        verified: false,
       };
-
-      logger.info(`[SAID] Identity registered: ${this.identity.profileUrl}`);
-    } catch (e) {
-      logger.warn(`[SAID] Registration failed (non-blocking): ${e}`);
-      this.identity = { wallet, secretKey, profileUrl: `https://saidprotocol.com/agents/${wallet}`, registeredAt: new Date().toISOString(), verified: false };
     }
 
     // Expose identity to runtime as character knowledge
@@ -110,5 +144,10 @@ export class SAIDService extends Service {
 
   getIdentity(): SAIDIdentity | null {
     return this.identity;
+  }
+
+  async stop(): Promise<void> {
+    // Cleanup if needed (none required currently)
+    logger.info('[SAID] Service stopped');
   }
 }
